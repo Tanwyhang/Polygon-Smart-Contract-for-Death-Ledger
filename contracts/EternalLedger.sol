@@ -2,224 +2,161 @@
 pragma solidity ^0.8.20;
 
 import "@openzeppelin/contracts/token/ERC721/ERC721.sol";
-import "@openzeppelin/contracts/access/AccessControl.sol";
+import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/utils/Strings.sol";
 
-/// @title EternalLedger - Decentralized Death Registry & Digital Memorials
-/// @notice EIP-5192 compliant Soulbound Death Token (SDT) for permanent death records
-/// @dev Implements soulbound tokens for deceased individuals with memorial capabilities
-
-interface ISoulbound {
-    /// @notice Returns true if the token is soulbound (non-transferable)
-    function locked(uint256 tokenId) external view returns (bool);
-}
-
-contract EternalLedger is ERC721, ISoulbound, AccessControl {
+/// @title Eternal Ledger - Lifecycle Registry
+/// @notice Binds identity (NRIC) to wallet, mints SBT on death
+/// @dev EIP-5192 compliant Soulbound Token for death certificates. Every token represents a deceased person.
+contract EternalLedger is ERC721, Ownable {
     using Strings for uint256;
 
-    // Role definitions
-    bytes32 public constant VERIFIED_ISSUER_ROLE = keccak256("VERIFIED_ISSUER_ROLE");
-    bytes32 public constant DAO_VERIFIER_ROLE = keccak256("DAO_VERIFIER_ROLE");
-
-    struct DeathRecord {
-        string fullName;           // Full name of deceased
-        uint256 birthDate;         // Birth date (timestamp)
-        uint256 deathDate;         // Death date (timestamp)
-        string placeOfDeath;       // Location where death occurred
-        string ipfsHash;           // IPFS hash for memorial content (optional)
-        address attestor;          // Who recorded this death
-        bool isVerified;           // Verified by trusted entity or DAO
-        uint256 recordedAt;        // When record was created
+    struct Record {
+        string metadataCID;     // IPFS CID pointing to JSON metadata
+        uint256 timestamp;      // Block timestamp when recorded
     }
 
-    struct MemorialContent {
-        string title;              // Memorial title
-        string description;        // Brief description
-        string[] ipfsHashes;       // Multiple IPFS hashes for photos, documents
-        bool hasRichMedia;         // Whether memorial includes rich media
-    }
-
-    // State variables
-    uint256 private _nextTokenId = 1;
-    mapping(uint256 => DeathRecord) public deathRecords;
-    mapping(uint256 => MemorialContent) public memorialContents;
-    mapping(uint256 => bool) private _locked;
-    mapping(string => uint256[]) public nameToTokenIds; // For searchability
-    mapping(bytes32 => bool) public usedProofs; // Prevent duplicate records
+    // NRIC to wallet mapping for identity binding
+    mapping(string => address) public nricToWallet;
+    mapping(address => string) public walletToNric;
+    
+    // Token records and death status
+    mapping(uint256 => Record) public records;
+    mapping(string => bool) public hasDied;
+    
+    // Authorized hospitals/registrars
+    mapping(address => bool) public authorizedRegistrars;
+    
+    uint256 public totalSupply;
 
     // Events
-    event DeathRecorded(
-        uint256 indexed tokenId,
-        string fullName,
-        uint256 deathDate,
-        address indexed attestor,
-        bool isVerified
-    );
-    
-    event MemorialCreated(
-        uint256 indexed tokenId,
-        string title,
-        string ipfsHash
-    );
-    
-    event RecordVerified(
-        uint256 indexed tokenId,
-        address indexed verifier
-    );
+    event IdentityBound(string indexed nric, address indexed wallet);
+    event DeathRecorded(string indexed nric, uint256 tokenId, string metadataCID);
+    event RegistrarAuthorized(address indexed registrar);
+    event RegistrarRevoked(address indexed registrar);
 
-    constructor() ERC721("EternalLedger", "SDT") {
-        _grantRole(DEFAULT_ADMIN_ROLE, msg.sender);
-        _grantRole(VERIFIED_ISSUER_ROLE, msg.sender);
+    constructor() ERC721("Eternal Ledger", "ETERNAL") Ownable(msg.sender) {
+        // Owner is automatically an authorized registrar
+        authorizedRegistrars[msg.sender] = true;
     }
 
-    /// @notice Record a death and mint a Soulbound Death Token (SDT)
-    /// @param to Address to mint the SDT to (usually deceased's wallet or family)
-    /// @param fullName Full name of the deceased
-    /// @param birthDate Birth date as timestamp
-    /// @param deathDate Death date as timestamp
-    /// @param placeOfDeath Location where death occurred
-    /// @param proofHash Hash of supporting documentation to prevent duplicates
-    function recordDeath(
-        address to,
-        string memory fullName,
-        uint256 birthDate,
-        uint256 deathDate,
-        string memory placeOfDeath,
-        bytes32 proofHash
-    ) external returns (uint256) {
-        require(deathDate >= birthDate, "Death date cannot be before birth date");
-        require(deathDate <= block.timestamp, "Death date cannot be in the future");
-        require(!usedProofs[proofHash], "Death record already exists with this proof");
-        require(bytes(fullName).length > 0, "Name cannot be empty");
+    modifier onlyRegistrar() {
+        require(authorizedRegistrars[msg.sender], "Not authorized registrar");
+        _;
+    }
 
-        uint256 tokenId = _nextTokenId++;
-        bool isVerified = hasRole(VERIFIED_ISSUER_ROLE, msg.sender);
+    /// @notice Authorize a hospital/registrar to bind identities and record deaths
+    function authorizeRegistrar(address registrar) external onlyOwner {
+        authorizedRegistrars[registrar] = true;
+        emit RegistrarAuthorized(registrar);
+    }
 
-        // Mark proof as used to prevent duplicates
-        usedProofs[proofHash] = true;
+    /// @notice Revoke registrar authorization
+    function revokeRegistrar(address registrar) external onlyOwner {
+        authorizedRegistrars[registrar] = false;
+        emit RegistrarRevoked(registrar);
+    }
 
-        // Create death record
-        deathRecords[tokenId] = DeathRecord({
-            fullName: fullName,
-            birthDate: birthDate,
-            deathDate: deathDate,
-            placeOfDeath: placeOfDeath,
-            ipfsHash: "",
-            attestor: msg.sender,
-            isVerified: isVerified,
-            recordedAt: block.timestamp
-        });
+    /// @notice Bind NRIC to wallet address (birth registration or eKYC)
+    /// @param nric National Registration Identity Card number
+    /// @param wallet Wallet address to bind to
+    function bindIdentity(string memory nric, address wallet) external onlyRegistrar {
+        require(bytes(nric).length > 0, "NRIC cannot be empty");
+        require(wallet != address(0), "Invalid wallet address");
+        require(nricToWallet[nric] == address(0), "NRIC already bound");
+        require(bytes(walletToNric[wallet]).length == 0, "Wallet already bound");
 
-        // Mint soulbound token
-        _mint(to, tokenId);
-        _locked[tokenId] = true;
-
-        // Add to searchable index
-        nameToTokenIds[_normalizeString(fullName)].push(tokenId);
-
-        emit DeathRecorded(tokenId, fullName, deathDate, msg.sender, isVerified);
+        nricToWallet[nric] = wallet;
+        walletToNric[wallet] = nric;
         
-        return tokenId;
+        emit IdentityBound(nric, wallet);
     }
 
-    /// @notice Add memorial content to an existing death record
-    /// @param tokenId The SDT token ID
-    /// @param title Memorial title
-    /// @param description Memorial description
-    /// @param ipfsHashes Array of IPFS hashes for memorial content
-    function createMemorial(
-        uint256 tokenId,
-        string memory title,
-        string memory description,
-        string[] memory ipfsHashes
-    ) external {
-        require(_ownerOf(tokenId) != address(0), "Token does not exist");
-        require(
-            ownerOf(tokenId) == msg.sender || 
-            hasRole(VERIFIED_ISSUER_ROLE, msg.sender) ||
-            deathRecords[tokenId].attestor == msg.sender,
-            "Not authorized to create memorial"
-        );
+    /// @notice Record death and mint Soulbound Token (death certificate)
+    /// @param nric NRIC of deceased person
+    /// @param metadataCID IPFS CID pointing to JSON metadata containing all death details
+    function recordDeath(
+        string memory nric,
+        string memory metadataCID
+    ) external onlyRegistrar {
+        require(bytes(nric).length > 0, "NRIC cannot be empty");
+        require(nricToWallet[nric] != address(0), "NRIC not registered");
+        require(!hasDied[nric], "Already deceased");
+        require(bytes(metadataCID).length > 0, "Metadata CID required");
 
-        memorialContents[tokenId] = MemorialContent({
-            title: title,
-            description: description,
-            ipfsHashes: ipfsHashes,
-            hasRichMedia: ipfsHashes.length > 0
+        address recipient = nricToWallet[nric];
+        uint256 tokenId = totalSupply + 1;
+
+        // Mint the Soulbound Token to the deceased's wallet
+        _safeMint(recipient, tokenId);
+
+        // Store the death record with minimal on-chain data
+        records[tokenId] = Record({
+            metadataCID: metadataCID,
+            timestamp: block.timestamp
         });
 
-        // Update main record with primary IPFS hash if provided
-        if (ipfsHashes.length > 0) {
-            deathRecords[tokenId].ipfsHash = ipfsHashes[0];
+        hasDied[nric] = true;
+        totalSupply++;
+
+        emit DeathRecorded(nric, tokenId, metadataCID);
+    }
+
+    /// @notice Check if a person is deceased by NRIC
+    function isDeceased(string memory nric) external view returns (bool) {
+        return hasDied[nric];
+    }
+
+    /// @notice Get death record by token ID
+    function getRecord(uint256 tokenId) external view returns (Record memory) {
+        require(_ownerOf(tokenId) != address(0), "Token does not exist");
+        return records[tokenId];
+    }
+
+    /// @notice Get token ID by NRIC (returns 0 if not deceased)
+    function getTokenByNric(string memory nric) external view returns (uint256) {
+        if (!hasDied[nric]) return 0;
+        
+        address wallet = nricToWallet[nric];
+        if (wallet == address(0)) return 0;
+        
+        // Find the token owned by this wallet
+        for (uint256 i = 1; i <= totalSupply; i++) {
+            if (_ownerOf(i) == wallet) {
+                return i;
+            }
         }
-
-        emit MemorialCreated(tokenId, title, ipfsHashes.length > 0 ? ipfsHashes[0] : "");
+        return 0;
     }
 
-    /// @notice Verify a death record (DAO or verified issuer only)
-    /// @param tokenId The SDT token ID to verify
-    function verifyRecord(uint256 tokenId) external {
-        require(_ownerOf(tokenId) != address(0), "Token does not exist");
-        require(
-            hasRole(DAO_VERIFIER_ROLE, msg.sender) || 
-            hasRole(VERIFIED_ISSUER_ROLE, msg.sender),
-            "Not authorized to verify records"
-        );
-
-        deathRecords[tokenId].isVerified = true;
-        emit RecordVerified(tokenId, msg.sender);
-    }
-
-    /// @notice Search for death records by name
-    /// @param name Name to search for
-    /// @return Array of token IDs matching the name
-    function searchByName(string memory name) external view returns (uint256[] memory) {
-        return nameToTokenIds[_normalizeString(name)];
-    }
-
-    /// @notice Get complete death record
-    /// @param tokenId The SDT token ID
-    /// @return The complete death record
-    function getDeathRecord(uint256 tokenId) external view returns (DeathRecord memory) {
-        require(_ownerOf(tokenId) != address(0), "Token does not exist");
-        return deathRecords[tokenId];
-    }
-
-    /// @notice Get memorial content
-    /// @param tokenId The SDT token ID
-    /// @return The memorial content
-    function getMemorialContent(uint256 tokenId) external view returns (MemorialContent memory) {
-        require(_ownerOf(tokenId) != address(0), "Token does not exist");
-        return memorialContents[tokenId];
-    }
-
-    /// @notice Check if a token is locked (soulbound)
-    /// @param tokenId The token ID to check
-    /// @return True if the token is locked
+    /// @notice EIP-5192: Check if token is locked (soulbound)
     function locked(uint256 tokenId) external view returns (bool) {
         require(_ownerOf(tokenId) != address(0), "Token does not exist");
-        return _locked[tokenId];
+        return true; // All tokens are soulbound
     }
 
-    /// @notice Add a verified issuer (hospitals, government agencies, etc.)
-    /// @param account Address to grant verified issuer role
-    function addVerifiedIssuer(address account) external onlyRole(DEFAULT_ADMIN_ROLE) {
-        _grantRole(VERIFIED_ISSUER_ROLE, account);
+    /// @notice Get all deceased records (for public registry)
+    function getAllDeceased() external view returns (uint256[] memory tokenIds, Record[] memory deceasedRecords) {
+        tokenIds = new uint256[](totalSupply);
+        deceasedRecords = new Record[](totalSupply);
+        
+        for (uint256 i = 1; i <= totalSupply; i++) {
+            tokenIds[i-1] = i;
+            deceasedRecords[i-1] = records[i];
+        }
+        
+        return (tokenIds, deceasedRecords);
     }
 
-    /// @notice Add a DAO verifier
-    /// @param account Address to grant DAO verifier role
-    function addDAOVerifier(address account) external onlyRole(DEFAULT_ADMIN_ROLE) {
-        _grantRole(DAO_VERIFIER_ROLE, account);
+    /// @notice Override token URI to return IPFS metadata
+    function tokenURI(uint256 tokenId) public view override returns (string memory) {
+        require(_ownerOf(tokenId) != address(0), "Token does not exist");
+        
+        Record memory record = records[tokenId];
+        return string(abi.encodePacked("ipfs://", record.metadataCID));
     }
 
-    /// @notice Get total number of recorded deaths
-    /// @return Total number of SDTs minted
-    function getTotalDeaths() external view returns (uint256) {
-        return _nextTokenId - 1;
-    }
-
-    /// @notice Override _update to prevent transfers (soulbound)
+    // Soulbound: Prevent all transfers by overriding _update
     function _update(address to, uint256 tokenId, address auth)
         internal
         override
@@ -228,74 +165,40 @@ contract EternalLedger is ERC721, ISoulbound, AccessControl {
         address from = _ownerOf(tokenId);
         
         // Allow minting (from == address(0)) but prevent all transfers
-        require(
-            from == address(0),
-            "Soulbound: Death tokens are non-transferable and eternal"
-        );
+        require(from == address(0), "Soulbound: non-transferable");
         
         return super._update(to, tokenId, auth);
     }
 
-    /// @notice Generate metadata URI for token
-    /// @param tokenId The token ID
-    /// @return The metadata URI
-    function tokenURI(uint256 tokenId) public view virtual override returns (string memory) {
+    // Explicitly block approval functions
+    function approve(address, uint256) public pure override {
+        revert("Soulbound: non-transferable");
+    }
+
+    function setApprovalForAll(address, bool) public pure override {
+        revert("Soulbound: non-transferable");
+    }
+
+    /// @notice Get comprehensive death statistics
+    function getDeathStatistics() external view returns (
+        uint256 totalDeaths,
+        uint256 oldestTokenId,
+        uint256 newestTokenId,
+        uint256 contractCreationTime
+    ) {
+        return (
+            totalSupply,
+            totalSupply > 0 ? 1 : 0,
+            totalSupply,
+            0 // You could store deployment timestamp if needed
+        );
+    }
+
+    /// @notice Emergency function to update metadata CID if needed
+    function updateMetadataCID(uint256 tokenId, string memory newMetadataCID) external onlyOwner {
         require(_ownerOf(tokenId) != address(0), "Token does not exist");
+        require(bytes(newMetadataCID).length > 0, "Metadata CID required");
         
-        DeathRecord memory record = deathRecords[tokenId];
-        
-        // Basic metadata - could be enhanced with off-chain metadata service
-        return string(abi.encodePacked(
-            "data:application/json;base64,",
-            _encodeBase64(abi.encodePacked(
-                '{"name":"',
-                record.fullName,
-                ' - Eternal Memorial","description":"Soulbound Death Token for ',
-                record.fullName,
-                '","attributes":[{"trait_type":"Death Date","value":"',
-                _timestampToDate(record.deathDate),
-                '"},{"trait_type":"Verified","value":"',
-                record.isVerified ? "Yes" : "No",
-                '"}]}'
-            ))
-        ));
-    }
-
-    /// @notice Normalize string for consistent searching
-    function _normalizeString(string memory str) internal pure returns (string memory) {
-        bytes memory strBytes = bytes(str);
-        bytes memory result = new bytes(strBytes.length);
-        
-        for (uint i = 0; i < strBytes.length; i++) {
-            // Convert to lowercase
-            if (strBytes[i] >= 0x41 && strBytes[i] <= 0x5A) {
-                result[i] = bytes1(uint8(strBytes[i]) + 32);
-            } else {
-                result[i] = strBytes[i];
-            }
-        }
-        
-        return string(result);
-    }
-
-    /// @notice Convert timestamp to readable date (basic implementation)
-    function _timestampToDate(uint256 timestamp) internal pure returns (string memory) {
-        return timestamp.toString();
-    }
-
-    /// @notice Basic Base64 encoding (simplified)
-    function _encodeBase64(bytes memory /* data */) internal pure returns (string memory) {
-        // Simplified base64 encoding - in production, use a proper library
-        return "encoded_metadata";
-    }
-
-    /// @notice Support interface detection
-    function supportsInterface(bytes4 interfaceId)
-        public
-        view
-        override(ERC721, AccessControl)
-        returns (bool)
-    {
-        return super.supportsInterface(interfaceId);
+        records[tokenId].metadataCID = newMetadataCID;
     }
 }

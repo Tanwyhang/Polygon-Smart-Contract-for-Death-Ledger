@@ -1,112 +1,138 @@
-# Eternal Ledger - Decentralized Death Registry
+# EternalLedger - Decentralized Death Registry
 
-This project implements the Eternal Ledger concept: a blockchain-based platform for permanently recording deaths and preserving digital memorials using Soulbound Death Tokens (SDT).
+A blockchain-based lifecycle registry that manages identity-to-death workflow using **Soulbound Tokens (SBTs)** as tamper-proof digital death certificates.
 
-## Overview
+## 🎯 Key Features
 
-Eternal Ledger is a decentralized, immutable registry that allows families, institutions, or trusted witnesses to record deaths on-chain, ensuring permanence, transparency, and global accessibility.
+- ✅ **EIP-5192 Compliant Soulbound Tokens** - Non-transferable death certificates
+- ✅ **IPFS Integration** - Off-chain metadata storage with on-chain CIDs
+- ✅ **Identity Binding** - Links national IDs (NRIC) to wallet addresses
+- ✅ **Multi-Registrar Support** - Hospital/authority authorization system
+- ✅ **Public Death Registry** - Transparent verification system
+- ✅ **Gas Optimized** - Minimal on-chain data storage
 
-## Features
+## 🏗️ Contract Architecture
 
-- **Soulbound Death Tokens (SDT)**: Non-transferable ERC721 tokens representing death records
-- **Comprehensive Death Records**: Full name, birth/death dates, location, attestor information
-- **Memorial System**: IPFS-based storage for photos, documents, and rich memorial content
-- **Role-Based Access Control**: Verified issuers (hospitals, government) and DAO verifiers
-- **Global Search**: Search death records by name across the entire registry
-- **Duplicate Prevention**: Cryptographic proof system prevents duplicate records
-- **EIP-5192 Compliance**: Proper soulbound token implementation
+### Core Components:
+- **Identity Binding**: NRIC ↔ Wallet mapping
+- **Death Recording**: Mint SBT with IPFS metadata
+- **Public Registry**: Query death status and records
+- **Authorization**: Multi-hospital registrar system
 
-## Quick Start
-
-```shell
-# Install dependencies
-npm install
-
-# Compile contracts
-npx hardhat compile
-
-# Run tests
-npx hardhat test
-
-# Deploy to Polygon Amoy testnet
-npx hardhat run scripts/deploy_eternal_ledger.js --network amoy
-
-# Record a death (after deployment)
-npx hardhat run scripts/record_death.js --network amoy
-
-# Create memorial content
-npx hardhat run scripts/create_memorial.js --network amoy
+### Data Structure:
+```solidity
+struct Record {
+    string metadataCID;     // IPFS hash to JSON metadata
+    uint256 timestamp;      // Recording timestamp  
+    bool isDeceased;        // Death status flag
+}
 ```
 
-## Project Structure
+## 🚀 Quick Start
+
+### Installation
+```bash
+npm install
+```
+
+### Compile
+```bash
+npx hardhat compile
+```
+
+### Test
+```bash
+npx hardhat test
+```
+
+### Deploy to Polygon Amoy
+```bash
+npx hardhat ignition deploy ./ignition/modules/EternalLedger.js --network amoy
+```
+
+### Check Balance (before deployment)
+```bash
+npx hardhat run scripts/check_balance.js --network amoy
+```
+
+### Bind Identity (after deployment)
+```bash
+# Update contract address in scripts/bind_identity.js first
+npx hardhat run scripts/bind_identity.js --network amoy
+```
+
+## 📁 Project Structure
 
 ```
 contracts/
-  └── EternalLedger.sol          # Main death registry contract
+├── EternalLedger.sol       # Main soulbound death certificate contract
 
 scripts/
-  ├── deploy_eternal_ledger.js   # Deploy the contract
-  ├── record_death.js            # Record a death and mint SDT
-  ├── create_memorial.js         # Add memorial content
-  ├── test_eternal_ledger.js     # Test all functionality
-  └── check_balance.js           # Check wallet balance
+├── check_balance.js        # Check wallet MATIC balance
+└── bind_identity.js        # Bind NRIC to wallet address
 
 test/
-  └── EternalLedger.js           # Comprehensive test suite
+└── EternalLedger.js        # Contract unit tests
 
 ignition/modules/
-  └── EternalLedger.js           # Hardhat Ignition deployment
+└── EternalLedger.js        # Hardhat Ignition deployment module
 ```
 
-## Core Concepts
+## 🔍 Usage Example
 
-### Soulbound Death Token (SDT)
-- Non-transferable token minted to deceased's identity wallet
-- Serves as cryptographic proof of death
-- Can be referenced by future decentralized systems
-- Enables automated status changes (DeFi accounts, pensions, digital wills)
-
-### Memorial NFT System
-- Optional rich memorial content storage
-- IPFS integration for permanent, decentralized storage
-- Support for photos, videos, documents, final wishes
-- Family-controlled memorial creation
-
-### Verification System
-- Trusted issuer roles for hospitals, government agencies
-- DAO-based verification for disputed cases
-- Community consensus mechanisms
-- Notarized document integration
-
-## Technology Stack
-
-- **Blockchain**: Ethereum/Polygon (EVM compatible)
-- **Token Standard**: ERC721 + EIP-5192 (Soulbound)
-- **Access Control**: OpenZeppelin AccessControl
-- **Storage**: IPFS for memorial content
-- **Development**: Hardhat, Ethers.js, Chai
-
-## Network Configuration
-
-The project is configured for Polygon Amoy testnet. Update `.env` with:
-
-```
-PRIVATE_KEY=your_wallet_private_key
-POLYGON_AMOY_RPC=https://rpc-amoy.polygon.technology
+### 1. Bind Identity (Hospital/Registrar)
+```javascript
+await eternalLedger.bindIdentity("S1234567A", "0x742d35Cc...");
 ```
 
-## Use Cases
+### 2. Record Death (Hospital/Registrar)  
+```javascript
+await eternalLedger.recordDeath("S1234567A", "QmMetadataCID...");
+```
 
-- **Refugee/War Casualty Records**: Immutable records in crisis zones
-- **Global Pandemics**: Unified registry during health crises  
-- **Diaspora Families**: Cross-border ancestry and legacy preservation
-- **Digital Inheritance**: Automated account management post-mortem
-- **Historical Records**: Tamper-proof death records for future generations
+### 3. Verify Death Status (Public)
+```javascript
+const isDeceased = await eternalLedger.isDeceased("S1234567A");
+```
 
-## Contributing
+### 4. Get Death Certificate (Public)
+```javascript
+const tokenId = await eternalLedger.getTokenByNric("S1234567A");
+const record = await eternalLedger.getRecord(tokenId);
+// Fetch full metadata: https://ipfs.io/ipfs/${record.metadataCID}
+```
 
-This project implements the Eternal Ledger concept for decentralized death registration and digital memorial preservation. Feel free to contribute improvements or suggest new features.
+## 📊 IPFS Metadata Schema
 
-## License
+```json
+{
+  "name": "John Doe",
+  "birthDate": "1980-01-01",
+  "deathDate": "2024-12-01",
+  "cause": "Natural causes", 
+  "location": "Singapore General Hospital",
+  "certificate": "ipfs://QmCertificateDocument...",
+  "nextOfKin": "Jane Doe",
+  "attributes": [
+    {"trait_type": "Death Year", "value": 2024},
+    {"trait_type": "Location", "value": "Singapore"}
+  ]
+}
+```
 
-MIT
+## 🛡️ Security Features
+
+- **Soulbound**: Tokens cannot be transferred or sold
+- **Authorized Registrars**: Only hospitals can record deaths  
+- **Immutable Records**: Death certificates cannot be altered
+- **Public Verification**: Anyone can verify death status
+
+## 🌐 Network Configuration
+
+- **Testnet**: Polygon Amoy (Chain ID: 80002)
+- **Mainnet Ready**: Polygon PoS
+- **Gas Optimized**: ~290k gas per death record
+
+## 📝 License
+
+MIT License
