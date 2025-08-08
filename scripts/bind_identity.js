@@ -19,7 +19,7 @@ async function main() {
   console.log("Identity bound successfully!");
   console.log("Transaction hash:", tx.hash);
   
-  // Verify the binding
+  // Verify the binding`
   const boundWallet = await eternalLedger.nricToWallet(testNric);
   const boundNric = await eternalLedger.walletToNric(testWallet);
   
